@@ -1,47 +1,69 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ULTRA AI PREDICTION</title>
-    <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ULTRA AI</title>
+<link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
 <header>
-    <h1>ULTRA AI</h1>
-    <p>COLOUR TRADING ANALYSIS SYSTEM</p>
+<h1>ULTRA AI</h1>
+<p>ADVANCED COLOUR TRADING ANALYSIS</p>
 </header>
 
 <main>
 
-    <section class="card">
-        <h2>AI ANALYSIS DASHBOARD</h2>
-        <p>Statistical analysis of previous game results.</p>
+<section class="card">
+<h2>AI ANALYSIS DASHBOARD</h2>
+<p>Statistical Game Analysis Engine</p>
+<div class="status">SYSTEM ONLINE</div>
+</section>
 
-        <div class="status">
-            SYSTEM STATUS: ONLINE
-        </div>
-    </section>
+<section class="card">
+<h2>GAME SELECTOR</h2>
 
-    <section class="card">
-        <h2>GAME SELECTOR</h2>
+<button onclick="selectGame('30 Seconds')">
+WINGO 30 SEC
+</button>
 
-        <button onclick="selectGame('30 Seconds')">
-            WINGO 30 SEC
-        </button>
+<button onclick="selectGame('1 Minute')">
+WINGO 1 MIN
+</button>
 
-        <button onclick="selectGame('1 Minute')">
-            WINGO 1 MIN
-        </button>
-    </section>
+<p id="game">Select game period</p>
+</section>
 
-    <section class="card">
-        <h2>ANALYSIS RESULT</h2>
-        <p id="game">Select a game period</p>
-        <p id="result">Waiting for data...</p>
-    </section>
+<section class="card">
+<h2>ENTER GAME RESULT</h2>
+
+<input type="number"
+id="numberInput"
+min="0"
+max="9"
+placeholder="Enter number (0-9)">
+
+<button onclick="addResult()">ADD RESULT</button>
+
+<p id="message">Waiting for results...</p>
+</section>
+
+<section class="card">
+<h2>STATISTICAL ANALYSIS</h2>
+
+<p>Total Results: <span id="total">0</span></p>
+<p>Big: <span id="big">0</span></p>
+<p>Small: <span id="small">0</span></p>
+
+<h3>Number Frequency</h3>
+<div id="frequency"></div>
+
+<h3>Recent Results</h3>
+<div id="history"></div>
+
+</section>
 
 </main>
 
