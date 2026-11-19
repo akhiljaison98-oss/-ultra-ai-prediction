@@ -5,6 +5,7 @@ let results = JSON.parse(
     localStorage.getItem("ultraResults") || "[]"
 );
 
+// Select game
 function selectGame(game) {
     selectedGame = game;
 
@@ -14,6 +15,7 @@ function selectGame(game) {
     updateDashboard();
 }
 
+// Add result
 function addResult() {
 
     const input = document.getElementById("numberInput");
@@ -53,6 +55,8 @@ function addResult() {
     updateDashboard();
 }
 
+
+// Main dashboard
 function updateDashboard() {
 
     const filtered = results.filter(
@@ -75,7 +79,6 @@ function updateDashboard() {
         } else {
             small++;
         }
-
     });
 
     document.getElementById("total").innerText = total;
@@ -92,13 +95,12 @@ function updateDashboard() {
             `<span class="result-number">${item.number}</span>`
         ).join(" ");
 
-    // UPDATE COLOUR AND PERCENTAGE STATISTICS
     updateColourDashboard();
+    updateTrendAnalysis(filtered);
 }
 
 
-// COLOUR STATISTICS
-
+// Colour statistics
 function updateColourDashboard() {
 
     const filtered = results.filter(
@@ -122,19 +124,16 @@ function updateColourDashboard() {
         else {
             red++;
         }
-
     });
 
     const total = filtered.length;
 
-    // Colour counts
     if (document.getElementById("green")) {
         document.getElementById("green").innerText = green;
         document.getElementById("red").innerText = red;
         document.getElementById("violet").innerText = violet;
     }
 
-    // Big and Small percentages
     if (document.getElementById("bigPercent")) {
         document.getElementById("bigPercent").innerText =
             total ? ((filtered.filter(r => r.number >= 5).length / total) * 100).toFixed(1) + "%" : "0%";
@@ -144,6 +143,95 @@ function updateColourDashboard() {
     }
 }
 
+
+// Trend detection
+function updateTrendAnalysis(filtered) {
+
+    let panel = document.getElementById("trendPanel");
+
+    if (!panel) {
+        panel = document.createElement("section");
+        panel.id = "trendPanel";
+        panel.className = "card";
+
+        document.querySelector("main").appendChild(panel);
+    }
+
+    const recent = filtered.slice(-10);
+
+    if (recent.length < 10) {
+        panel.innerHTML = `
+            <h2>AI TREND MONITOR</h2>
+            <h3>⚪ INSUFFICIENT DATA</h3>
+            <p>Add at least 10 results to analyse recent patterns.</p>
+        `;
+        return;
+    }
+
+    let bigCount = 0;
+    let smallCount = 0;
+    let longestStreak = 1;
+    let currentStreak = 1;
+
+    for (let i = 0; i < recent.length; i++) {
+
+        if (recent[i].number >= 5) {
+            bigCount++;
+        } else {
+            smallCount++;
+        }
+
+        if (i > 0) {
+
+            const previous = recent[i - 1].number >= 5;
+            const current = recent[i].number >= 5;
+
+            if (previous === current) {
+                currentStreak++;
+            } else {
+                currentStreak = 1;
+            }
+
+            longestStreak = Math.max(
+                longestStreak,
+                currentStreak
+            );
+        }
+    }
+
+    let status;
+    let message;
+
+    if (longestStreak >= 7 ||
+        bigCount >= 8 ||
+        smallCount >= 8) {
+
+        status = "🔴 BAD TREND";
+        message = "Recent results show an unusually concentrated pattern. Avoid treating this as a reliable prediction signal.";
+
+    } else if (longestStreak >= 5) {
+
+        status = "🟡 CAUTION";
+        message = "A repeated pattern is appearing. Continue observing; do not assume it will continue or reverse.";
+
+    } else {
+
+        status = "🟢 STABLE PATTERN";
+        message = "No extreme pattern detected in the last 10 results. This does not mean the next prediction is more likely to win.";
+    }
+
+    panel.innerHTML = `
+        <h2>AI TREND MONITOR</h2>
+        <h3>${status}</h3>
+        <p>${message}</p>
+        <p>Last 10 Big: ${bigCount}</p>
+        <p>Last 10 Small: ${smallCount}</p>
+        <p>Longest same-side streak: ${longestStreak}</p>
+    `;
+}
+
+
+// Start dashboard
 updateDashboard();
 
-console.log("ULTRA AI Statistical Engine Loaded");
+console.log("ULTRA AI Trend Monitor Loaded");
