@@ -4,12 +4,23 @@ let results = JSON.parse(
     localStorage.getItem("ultraResults") || "[]"
 );
 
-let predictions = JSON.parse(
+// Migrate old prediction storage
+let oldPredictions = JSON.parse(
     localStorage.getItem("ultraPredictions") || "{}"
 );
 
+let predictions = Array.isArray(oldPredictions)
+    ? oldPredictions
+    : Object.values(oldPredictions).filter(Boolean);
+
 const WORKER_URL =
 "https://ultra-ai-prediction.akhiljaison98.workers.dev/";
+
+predictions = predictions
+    .filter(p => p && p.period && p.game)
+    .slice(-50);
+
+savePredictions();
 
 // SELECT GAME
 function selectGame(game) {
@@ -19,10 +30,12 @@ function selectGame(game) {
         "Selected: Wingo " + game;
 
     updateDashboard();
+    displayCurrentPrediction();
+    renderPredictionHistory();
     fetchWingoResults();
 }
 
-// SAVE DATA
+// SAVE RESULTS
 function saveResults() {
     results = results.slice(-500);
 
@@ -32,40 +45,14 @@ function saveResults() {
     );
 }
 
+// SAVE PREDICTIONS
 function savePredictions() {
+    predictions = predictions.slice(-50);
+
     localStorage.setItem(
         "ultraPredictions",
         JSON.stringify(predictions)
     );
-}
-
-// MANUAL RESULT
-function addResult() {
-    const input = document.getElementById("numberInput");
-    const number = Number(input.value);
-
-    if (!selectedGame) {
-        alert("Select a game first!");
-        return;
-    }
-
-    if (input.value === "" ||
-        !Number.isInteger(number) ||
-        number < 0 || number > 9) {
-        alert("Enter a number between 0 and 9");
-        return;
-    }
-
-    results.push({
-        number,
-        game: selectedGame,
-        time: new Date().toISOString()
-    });
-
-    saveResults();
-    input.value = "";
-
-    updateDashboard();
 }
 
 // FETCH LIVE RESULTS
@@ -76,31 +63,37 @@ async function fetchWingoResults() {
         selectedGame === "30 Seconds" ? "30s" : "1m";
 
     try {
+        document.getElementById("message").innerText =
+            "Fetching live results...";
+
         const response = await fetch(
             WORKER_URL + "?game=" + gameCode
         );
 
         if (!response.ok) {
-            throw new Error("API error");
+            throw new Error("API error: " + response.status);
         }
 
         const data = await response.json();
 
-        if (!data.success || !Array.isArray(data.history)) {
+        if (!data.success ||
+            !Array.isArray(data.history)) {
             throw new Error("Invalid API response");
         }
 
         [...data.history].reverse().forEach(item => {
+            const period = String(item.issueNumber);
+
             const exists = results.some(
                 r => r.game === selectedGame &&
-                     r.period === item.issueNumber
+                     String(r.period) === period
             );
 
             if (!exists) {
                 results.push({
                     number: Number(item.number),
                     game: selectedGame,
-                    period: item.issueNumber,
+                    period: period,
                     colour: item.colour,
                     premium: item.premium,
                     time: new Date().toISOString()
@@ -113,9 +106,11 @@ async function fetchWingoResults() {
         verifyPredictions();
         generatePrediction();
         updateDashboard();
+        renderPredictionHistory();
 
         document.getElementById("message").innerText =
-            "LIVE CONNECTED | " + data.current.issueNumber;
+            "LIVE CONNECTED | Period: " +
+            data.current.issueNumber;
 
     } catch (error) {
         document.getElementById("message").innerText =
@@ -131,7 +126,7 @@ function getColour(number) {
     return number % 2 === 1 ? "GREEN" : "RED";
 }
 
-// NEXT PERIOD NUMBER
+// NEXT PERIOD
 function nextPeriod(period) {
     if (!period || !/^\d+$/.test(period)) return "";
 
@@ -140,6 +135,7 @@ function nextPeriod(period) {
 
     for (let i = digits.length - 1; i >= 0 && carry; i--) {
         const value = Number(digits[i]) + carry;
+
         digits[i] = String(value % 10);
         carry = value > 9 ? 1 : 0;
     }
@@ -155,10 +151,12 @@ function generatePrediction() {
         .filter(r =>
             r.game === selectedGame &&
             r.period &&
-            Number.isInteger(r.number)
+            Number.isInteger(r.number) &&
+            r.number >= 0 &&
+            r.number <= 9
         )
         .sort((a, b) =>
-            a.period.localeCompare(b.period)
+            String(a.period).localeCompare(String(b.period))
         );
 
     if (filtered.length < 10) {
@@ -170,14 +168,17 @@ function generatePrediction() {
 
     const latest = filtered[filtered.length - 1];
 
-    const targetPeriod = nextPeriod(latest.period);
+    const targetPeriod = nextPeriod(
+        String(latest.period)
+    );
 
-    const existing = predictions[selectedGame];
+    // Do not create duplicate predictions
+    const existing = predictions.find(
+        p => p.game === selectedGame &&
+             String(p.period) === targetPeriod
+    );
 
-    // Keep an existing pending prediction
-    if (existing &&
-        existing.period === targetPeriod &&
-        !existing.settled) {
+    if (existing) {
         displayPrediction(existing);
         return;
     }
@@ -202,50 +203,112 @@ function generatePrediction() {
         if (item.number >= 5) big++;
         else small++;
 
-        const colour = item.colour ||
-            getColour(item.number);
+        const colour =
+            item.colour || getColour(item.number);
 
         if (colours[colour] !== undefined) {
             colours[colour]++;
         }
     });
 
-    const total = sample.length;
-
     const numberPrediction = numbers.indexOf(
         Math.max(...numbers)
     );
 
-    const bigPrediction = big >= small ? "BIG" : "SMALL";
+    const bigPrediction =
+        big >= small ? "BIG" : "SMALL";
 
-    const colourPrediction = Object.keys(colours).reduce(
-        (a, b) => colours[a] >= colours[b] ? a : b
-    );
-
-    const bigShare = Math.max(big, small) / total;
-
-    const numberShare =
-        numbers[numberPrediction] / total;
+    const colourPrediction =
+        Object.keys(colours).reduce(
+            (a, b) => colours[a] >= colours[b] ? a : b
+        );
 
     const prediction = {
+        game: selectedGame,
         period: targetPeriod,
         number: numberPrediction,
         bigSmall: bigPrediction,
         colour: colourPrediction,
-        samples: total,
-        historicalBigSmallShare: bigShare,
-        historicalNumberShare: numberShare,
+        samples: sample.length,
         settled: false,
         createdAt: new Date().toISOString()
     };
 
-    predictions[selectedGame] = prediction;
+    predictions.push(prediction);
 
     savePredictions();
+
     displayPrediction(prediction);
+    renderPredictionHistory();
 }
 
-// DISPLAY PREDICTION
+// VERIFY ALL PREDICTIONS
+function verifyPredictions() {
+    let changed = false;
+
+    predictions.forEach(prediction => {
+        if (prediction.game !== selectedGame ||
+            prediction.settled) {
+            return;
+        }
+
+        const actual = results.find(
+            r => r.game === selectedGame &&
+                 String(r.period) === String(prediction.period)
+        );
+
+        if (!actual) return;
+
+        prediction.actualNumber = actual.number;
+
+        prediction.actualBigSmall =
+            actual.number >= 5 ? "BIG" : "SMALL";
+
+        prediction.actualColour =
+            actual.colour || getColour(actual.number);
+
+        prediction.numberCorrect =
+            prediction.number === actual.number;
+
+        prediction.bigSmallCorrect =
+            prediction.bigSmall === prediction.actualBigSmall;
+
+        prediction.colourCorrect =
+            prediction.colour === prediction.actualColour;
+
+        prediction.settled = true;
+
+        prediction.settledAt =
+            new Date().toISOString();
+
+        changed = true;
+    });
+
+    if (changed) {
+        savePredictions();
+    }
+}
+
+// ACCURACY
+function getAccuracy(type) {
+    const records = predictions.filter(
+        p => p.game === selectedGame && p.settled
+    );
+
+    if (!records.length) return "Not available";
+
+    const correct = records.filter(p => {
+        if (type === "number") return p.numberCorrect;
+        if (type === "bigSmall") return p.bigSmallCorrect;
+        return p.colourCorrect;
+    }).length;
+
+    return (
+        correct / records.length * 100
+    ).toFixed(1);
+}
+
+// DISPLAY CURRENT PREDICTION
 function displayPrediction(p) {
     let panel = document.getElementById("predictionPanel");
 
@@ -256,10 +319,6 @@ function displayPrediction(p) {
 
         document.querySelector("main").appendChild(panel);
     }
-
-    const bigSmallAccuracy = getAccuracy("bigSmall");
-    const colourAccuracy = getAccuracy("colour");
-    const numberAccuracy = getAccuracy("number");
 
     panel.innerHTML = `
         <h2>ULTRA AI PREDICTION ENGINE</h2>
@@ -280,74 +339,79 @@ function displayPrediction(p) {
 
         <hr>
 
-        <h3>HISTORICAL ACCURACY TRACKER</h3>
-        <p>Big / Small: ${bigSmallAccuracy}%</p>
-        <p>Colour: ${colourAccuracy}%</p>
-        <p>Exact Number: ${numberAccuracy}%</p>
+        <h3>HISTORICAL ACCURACY</h3>
+        <p>Big / Small: ${getAccuracy("bigSmall")}%</p>
+        <p>Colour: ${getAccuracy("colour")}%</p>
+        <p>Exact Number: ${getAccuracy("number")}%</p>
 
-        <p>
-            Prediction status:
-            ${p.settled ? "RESULT VERIFIED" : "WAITING FOR RESULT"}
+        <p>Prediction status:
+        ${p.settled ? "RESULT VERIFIED" : "WAITING FOR RESULT"}
         </p>
 
         <small>
-            Estimates are based on historical frequencies.
-            They do not guarantee future outcomes.
+        Historical-frequency estimates do not guarantee
+        future outcomes.
         </small>
     `;
 }
 
-// VERIFY PREDICTIONS
-function verifyPredictions() {
-    const prediction = predictions[selectedGame];
+// SHOW EXISTING PREDICTION
+function displayCurrentPrediction() {
+    const existing = predictions
+        .filter(p => p.game === selectedGame && !p.settled)
+        .sort((a, b) =>
+            String(b.period).localeCompare(String(a.period))
+        )[0];
 
-    if (!prediction || prediction.settled) return;
-
-    const actual = results.find(
-        r => r.game === selectedGame &&
-             r.period === prediction.period
-    );
-
-    if (!actual) return;
-
-    const actualColour =
-        actual.colour || getColour(actual.number);
-
-    prediction.actualNumber = actual.number;
-
-    prediction.actualBigSmall =
-        actual.number >= 5 ? "BIG" : "SMALL";
-
-    prediction.actualColour = actualColour;
-
-    prediction.numberCorrect =
-        prediction.number === actual.number;
-
-    prediction.bigSmallCorrect =
-        prediction.bigSmall === prediction.actualBigSmall;
-
-    prediction.colourCorrect =
-        prediction.colour === actualColour;
-
-    prediction.settled = true;
-
-    savePredictions();
+    if (existing) {
+        displayPrediction(existing);
+    }
 }
 
-// ACCURACY CALCULATION
-function getAccuracy(type) {
-    const records = Object.values(predictions)
-        .filter(p => p.settled);
+// PREDICTION HISTORY TABLE
+function renderPredictionHistory() {
+    const table = document.getElementById(
+        "predictionHistory"
+    );
 
-    if (!records.length) return "Not available";
+    if (!table) return;
 
-    const correct = records.filter(p => {
-        if (type === "number") return p.numberCorrect;
-        if (type === "bigSmall") return p.bigSmallCorrect;
-        return p.colourCorrect;
-    }).length;
+    const history = predictions
+        .filter(p => p.game === selectedGame)
+        .slice()
+        .reverse()
+        .slice(0, 50);
 
-    return (correct / records.length * 100).toFixed(1);
+    if (!history.length) {
+        table.innerHTML = `
+            <tr>
+                <td colspan="4">No predictions available yet.</td>
+            </tr>
+        `;
+        return;
+    }
+
+    table.innerHTML = history.map(p => {
+        let actual = "Pending";
+        let status = "⏳ WAITING";
+
+        if (p.settled) {
+            actual = p.actualNumber;
+
+            status = p.numberCorrect
+                ? "🟢 WIN"
+                : "🔴 LOSS";
+        }
+
+        return `
+            <tr>
+                <td>${p.period}</td>
+                <td>${p.number}</td>
+                <td>${actual}</td>
+                <td>${status}</td>
+            </tr>
+        `;
+    }).join("");
 }
 
 // PREDICTION MESSAGE
@@ -358,6 +422,7 @@ function showPredictionMessage(message) {
         panel = document.createElement("section");
         panel.id = "predictionPanel";
         panel.className = "card";
+
         document.querySelector("main").appendChild(panel);
     }
 
@@ -384,7 +449,11 @@ function updateDashboard() {
     const frequency = Array(10).fill(0);
 
     filtered.forEach(item => {
-        frequency[item.number]++;
+        if (Number.isInteger(item.number) &&
+            item.number >= 0 &&
+            item.number <= 9) {
+            frequency[item.number]++;
+        }
     });
 
     document.getElementById("total").innerText = total;
@@ -412,7 +481,8 @@ function updateColourDashboard(filtered) {
     let violet = 0;
 
     filtered.forEach(item => {
-        const colour = item.colour || getColour(item.number);
+        const colour =
+            item.colour || getColour(item.number);
 
         if (colour.includes("GREEN")) green++;
         if (colour.includes("RED")) red++;
@@ -444,6 +514,7 @@ function updateTrendAnalysis(filtered) {
         panel = document.createElement("section");
         panel.id = "trendPanel";
         panel.className = "card";
+
         document.querySelector("main").appendChild(panel);
     }
 
