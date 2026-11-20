@@ -227,6 +227,87 @@ function updateTrendAnalysis(filtered) {
         <p>Last 10 Big: ${bigCount}</p>
         <p>Last 10 Small: ${smallCount}</p>
         <p>Longest same-side streak: ${longestStreak}</p>
+        // AUTOMATIC WINGOBOT CONNECTION
+
+const WORKER_URL =
+"https://ultra-ai-prediction.akhiljaison98.workers.dev/";
+
+async function fetchWingoResults() {
+
+    if (!selectedGame) return;
+
+    const gameCode =
+        selectedGame === "30 Seconds" ? "30s" : "1m";
+
+    try {
+        document.getElementById("message").innerText =
+            "Fetching live results...";
+
+        const response = await fetch(
+            WORKER_URL + "?game=" + gameCode
+        );
+
+        if (!response.ok) {
+            throw new Error("API error: " + response.status);
+        }
+
+        const data = await response.json();
+
+        if (!data.success || !Array.isArray(data.history)) {
+            throw new Error("Invalid API response");
+        }
+
+        [...data.history].reverse().forEach(item => {
+
+            const exists = results.some(
+                r => r.period === item.issueNumber &&
+                     r.game === selectedGame
+            );
+
+            if (!exists) {
+                results.push({
+                    number: Number(item.number),
+                    game: selectedGame,
+                    period: item.issueNumber,
+                    colour: item.colour,
+                    premium: item.premium,
+                    time: new Date().toISOString()
+                });
+            }
+        });
+
+        results = results.slice(-500);
+
+        localStorage.setItem(
+            "ultraResults",
+            JSON.stringify(results)
+        );
+
+        updateDashboard();
+
+        document.getElementById("message").innerText =
+            "LIVE CONNECTED | Period: " +
+            data.current.issueNumber;
+
+    } catch (error) {
+
+        document.getElementById("message").innerText =
+            "Connection error: " + error.message;
+
+        console.error(error);
+    }
+}
+
+// Automatic refresh every 30 seconds
+setInterval(fetchWingoResults, 30000);
+
+// Fetch when a game is selected
+const originalSelectGame = selectGame;
+
+selectGame = function(game) {
+    originalSelectGame(game);
+    fetchWingoResults();
+};
     `;
 }
 
