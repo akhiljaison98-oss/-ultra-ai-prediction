@@ -310,7 +310,71 @@ selectGame = function(game) {
 };
     `;
 }
+// AUTOMATIC WINGO RESULT FETCHER
 
+async function fetchWingoResults() {
+    if (!selectedGame) return;
+
+    const gameCode =
+        selectedGame === "30 Seconds" ? "30s" : "1m";
+
+    try {
+        const response = await fetch(
+            `https://ultra-ai-prediction.akhiljaison98.workers.dev/?game=${gameCode}`
+        );
+
+        const data = await response.json();
+
+        if (!data.history) {
+            console.log("No history received");
+            return;
+        }
+
+        data.history.forEach(item => {
+            const exists = results.some(
+                r => r.game === selectedGame &&
+                     r.period === item.issueNumber
+            );
+
+            if (!exists) {
+                results.push({
+                    number: Number(item.number),
+                    game: selectedGame,
+                    period: item.issueNumber,
+                    colour: item.colour,
+                    time: new Date().toISOString()
+                });
+            }
+        });
+
+        localStorage.setItem(
+            "ultraResults",
+            JSON.stringify(results)
+        );
+
+        updateDashboard();
+
+        document.getElementById("message").innerText =
+            "Live results updated successfully!";
+
+    } catch (error) {
+        document.getElementById("message").innerText =
+            "Unable to fetch live results.";
+    }
+}
+
+
+// AUTOMATIC REFRESH
+setInterval(fetchWingoResults, 10000);
+
+
+// CONNECT GAME SELECTOR
+const oldSelectGame = selectGame;
+
+selectGame = function(game) {
+    oldSelectGame(game);
+    fetchWingoResults();
+};
 
 // Start dashboard
 updateDashboard();
