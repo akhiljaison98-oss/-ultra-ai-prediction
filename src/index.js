@@ -3,11 +3,15 @@ export default {
     const cors = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization"
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Content-Type": "application/json"
     };
 
     const reply = (data, status = 200) =>
-      Response.json(data, { status, headers: cors });
+      new Response(JSON.stringify(data), {
+        status,
+        headers: cors
+      });
 
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: cors });
@@ -17,11 +21,8 @@ export default {
       return reply({ error: "Method not allowed" }, 405);
     }
 
-    if (
-      request.headers.get("Authorization") !==
-      `Bearer ${env.AUTH_KEY}`
-    ) {
-      return reply({ error: "Unauthorized" }, 401);
+    if (!env.WINGOBOT_API_TOKEN) {
+      return reply({ error: "API token is missing" }, 500);
     }
 
     const url = new URL(request.url);
@@ -34,7 +35,7 @@ export default {
     } else if (game === "1m") {
       endpoint = "1-min-game-history";
     } else {
-      return reply({ error: "Invalid game. Use 30s or 1m." }, 400);
+      return reply({ error: "Use game=30s or game=1m" }, 400);
     }
 
     try {
@@ -47,20 +48,12 @@ export default {
         }
       );
 
-      if (!response.ok) {
-        return reply({
-          error: "WingoBot API request failed",
-          upstreamStatus: response.status
-        }, 502);
-      }
-
       const data = await response.json();
-      return reply(data);
+
+      return reply(data, response.ok ? 200 : 502);
 
     } catch (error) {
-      return reply({ error: "Unable to fetch game history" }, 500);
+      return reply({ error: "Unable to fetch WingoBot history" }, 502);
     }
   }
 };
-
-    
