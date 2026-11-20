@@ -4,7 +4,6 @@ let results = JSON.parse(
     localStorage.getItem("ultraResults") || "[]"
 );
 
-// Migrate old prediction storage
 let oldPredictions = JSON.parse(
     localStorage.getItem("ultraPredictions") || "{}"
 );
@@ -16,7 +15,7 @@ let predictions = Array.isArray(oldPredictions)
 const WORKER_URL =
 "https://ultra-ai-prediction.akhiljaison98.workers.dev/";
 
-// Compare period numbers safely, even when they are very large
+// COMPARE PERIODS
 function comparePeriods(a, b) {
     const x = String(a).replace(/^0+(?=\d)/, "");
     const y = String(b).replace(/^0+(?=\d)/, "");
@@ -28,7 +27,7 @@ function comparePeriods(a, b) {
     return x.localeCompare(y);
 }
 
-// Keep only the latest 50 predictions for each game
+// TRIM PREDICTIONS
 function trimPredictions() {
     const games = [...new Set(
         predictions
@@ -47,7 +46,16 @@ function trimPredictions() {
     );
 }
 
-trimPredictions();
+// SAVE PREDICTIONS
+function savePredictions() {
+    trimPredictions();
+
+    localStorage.setItem(
+        "ultraPredictions",
+        JSON.stringify(predictions)
+    );
+}
+
 savePredictions();
 
 // SELECT GAME
@@ -70,16 +78,6 @@ function saveResults() {
     localStorage.setItem(
         "ultraResults",
         JSON.stringify(results)
-    );
-}
-
-// SAVE PREDICTIONS
-function savePredictions() {
-    trimPredictions();
-
-    localStorage.setItem(
-        "ultraPredictions",
-        JSON.stringify(predictions)
     );
 }
 
@@ -154,6 +152,11 @@ function getColour(number) {
     return number % 2 === 1 ? "GREEN" : "RED";
 }
 
+// BIG / SMALL CLASSIFICATION
+function getBigSmall(number) {
+    return Number(number) >= 5 ? "BIG" : "SMALL";
+}
+
 // NEXT PERIOD
 function nextPeriod(period) {
     if (!period || !/^\d+$/.test(period)) return "";
@@ -201,7 +204,6 @@ function generatePrediction() {
         String(latest.period)
     );
 
-    // Do not create duplicate predictions
     const existing = predictions.find(
         p => p.game === selectedGame &&
              String(p.period) === targetPeriod
@@ -271,13 +273,12 @@ function generatePrediction() {
     renderPredictionHistory();
 }
 
-// VERIFY ALL PREDICTIONS
+// VERIFY PREDICTIONS
 function verifyPredictions() {
     let changed = false;
 
     predictions.forEach(prediction => {
-        if (prediction.game !== selectedGame ||
-            prediction.settled) {
+        if (prediction.game !== selectedGame) {
             return;
         }
 
@@ -288,10 +289,10 @@ function verifyPredictions() {
 
         if (!actual) return;
 
-        prediction.actualNumber = actual.number;
+        const actualBigSmall = getBigSmall(actual.number);
 
-        prediction.actualBigSmall =
-            actual.number >= 5 ? "BIG" : "SMALL";
+        prediction.actualNumber = actual.number;
+        prediction.actualBigSmall = actualBigSmall;
 
         prediction.actualColour =
             actual.colour || getColour(actual.number);
@@ -300,7 +301,7 @@ function verifyPredictions() {
             prediction.number === actual.number;
 
         prediction.bigSmallCorrect =
-            prediction.bigSmall === prediction.actualBigSmall;
+            prediction.bigSmall === actualBigSmall;
 
         prediction.colourCorrect =
             prediction.colour === prediction.actualColour;
@@ -308,7 +309,7 @@ function verifyPredictions() {
         prediction.settled = true;
 
         prediction.settledAt =
-            new Date().toISOString();
+            prediction.settledAt || new Date().toISOString();
 
         changed = true;
     });
@@ -321,14 +322,21 @@ function verifyPredictions() {
 // ACCURACY
 function getAccuracy(type) {
     const records = predictions.filter(
-        p => p.game === selectedGame && p.settled
+        p => p.game === selectedGame &&
+             p.settled &&
+             p.bigSmall &&
+             p.actualBigSmall
     );
 
     if (!records.length) return "Not available";
 
     const correct = records.filter(p => {
+        if (type === "bigSmall") {
+            return p.bigSmall === p.actualBigSmall;
+        }
+
         if (type === "number") return p.numberCorrect;
-        if (type === "bigSmall") return p.bigSmallCorrect;
+
         return p.colourCorrect;
     }).length;
 
@@ -370,8 +378,6 @@ function displayPrediction(p) {
 
         <h3>HISTORICAL ACCURACY</h3>
         <p>Big / Small: ${getAccuracy("bigSmall")}%</p>
-        <p>Colour: ${getAccuracy("colour")}%</p>
-        <p>Exact Number: ${getAccuracy("number")}%</p>
 
         <p>Prediction status:
         ${p.settled ? "RESULT VERIFIED" : "WAITING FOR RESULT"}
@@ -398,7 +404,7 @@ function displayCurrentPrediction() {
     }
 }
 
-// PREDICTION HISTORY TABLE
+// PREDICTION HISTORY - BIG / SMALL
 function renderPredictionHistory() {
     const table = document.getElementById(
         "predictionHistory"
@@ -424,20 +430,25 @@ function renderPredictionHistory() {
     }
 
     table.innerHTML = history.map(p => {
+        const predicted = p.bigSmall || "N/A";
+
         const actual = p.settled
-            ? p.actualNumber
+            ? p.actualBigSmall
             : "Pending";
+
+        const isWin = p.settled &&
+            p.bigSmall === p.actualBigSmall;
 
         const status = !p.settled
             ? "⏳ WAITING"
-            : p.numberCorrect
+            : isWin
                 ? "🟢 WIN"
                 : "🔴 LOSS";
 
         return `
             <tr>
                 <td>${p.period}</td>
-                <td>${p.number}</td>
+                <td>${predicted}</td>
                 <td>${actual}</td>
                 <td>${status}</td>
             </tr>
