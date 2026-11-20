@@ -109,6 +109,10 @@ async function fetchWingoResults() {
 
         [...data.history].reverse().forEach(item => {
             const period = String(item.issueNumber);
+            const number = Number(item.number);
+
+            if (!Number.isInteger(number) ||
+                number < 0 || number > 9) return;
 
             const exists = results.some(
                 r => r.game === selectedGame &&
@@ -117,9 +121,9 @@ async function fetchWingoResults() {
 
             if (!exists) {
                 results.push({
-                    number: Number(item.number),
+                    number,
                     game: selectedGame,
-                    period: period,
+                    period,
                     colour: item.colour,
                     premium: item.premium,
                     time: new Date().toISOString()
@@ -176,6 +180,71 @@ function nextPeriod(period) {
     return digits.join("");
 }
 
+// WEIGHTED TREND ENGINE
+function analyseWeightedTrend(filtered) {
+    const windows = [
+        { size: 10, weight: 0.50 },
+        { size: 30, weight: 0.30 },
+        { size: 100, weight: 0.20 }
+    ];
+
+    let bigScore = 0;
+    let smallScore = 0;
+    let totalWeight = 0;
+
+    const breakdown = {};
+
+    windows.forEach(window => {
+        if (filtered.length < window.size) return;
+
+        const sample = filtered.slice(-window.size);
+
+        const big = sample.filter(
+            r => getBigSmall(r.number) === "BIG"
+        ).length;
+
+        const small = sample.length - big;
+
+        const bigRate = big / sample.length;
+        const smallRate = small / sample.length;
+
+        bigScore += bigRate * window.weight;
+        smallScore += smallRate * window.weight;
+        totalWeight += window.weight;
+
+        breakdown[window.size] = {
+            big,
+            small,
+            total: sample.length,
+            bigPercent: (bigRate * 100).toFixed(1),
+            smallPercent: (smallRate * 100).toFixed(1)
+        };
+    });
+
+    if (!totalWeight) return null;
+
+    bigScore /= totalWeight;
+    smallScore /= totalWeight;
+
+    const trendStrength =
+        Math.max(bigScore, smallScore) * 100;
+
+    let prediction = "NO CLEAR SIGNAL";
+
+    if (trendStrength >= 55) {
+        prediction =
+            bigScore > smallScore ? "BIG" : "SMALL";
+    }
+
+    return {
+        prediction,
+        trendStrength: trendStrength.toFixed(1),
+        bigPercent: (bigScore * 100).toFixed(1),
+        smallPercent: (smallScore * 100).toFixed(1),
+        breakdown
+    };
+}
+
 // PREDICTION ENGINE
 function generatePrediction() {
     const filtered = results
@@ -204,22 +273,18 @@ function generatePrediction() {
         String(latest.period)
     );
 
-    const existing = predictions.find(
+    const trend = analyseWeightedTrend(filtered);
+
+    if (!trend) return;
+
+    const existingIndex = predictions.findIndex(
         p => p.game === selectedGame &&
              String(p.period) === targetPeriod
     );
 
-    if (existing) {
-        displayPrediction(existing);
-        return;
-    }
-
+    // NUMBER FREQUENCY
     const sample = filtered.slice(-100);
-
     const numbers = Array(10).fill(0);
-
-    let big = 0;
-    let small = 0;
 
     const colours = {
         "GREEN": 0,
@@ -230,9 +295,6 @@ function generatePrediction() {
 
     sample.forEach(item => {
         numbers[item.number]++;
-
-        if (item.number >= 5) big++;
-        else small++;
 
         const colour =
             item.colour || getColour(item.number);
@@ -246,9 +308,6 @@ function generatePrediction() {
         Math.max(...numbers)
     );
 
-    const bigPrediction =
-        big >= small ? "BIG" : "SMALL";
-
     const colourPrediction =
         Object.keys(colours).reduce(
             (a, b) => colours[a] >= colours[b] ? a : b
@@ -258,14 +317,30 @@ function generatePrediction() {
         game: selectedGame,
         period: targetPeriod,
         number: numberPrediction,
-        bigSmall: bigPrediction,
+        bigSmall: trend.prediction,
         colour: colourPrediction,
         samples: sample.length,
+        trendStrength: trend.trendStrength,
+        bigPercent: trend.bigPercent,
+        smallPercent: trend.smallPercent,
+        breakdown: trend.breakdown,
         settled: false,
         createdAt: new Date().toISOString()
     };
 
-    predictions.push(prediction);
+    if (existingIndex !== -1) {
+        const existing = predictions[existingIndex];
+
+        // Update old pending predictions with the new engine.
+        if (!existing.settled) {
+            predictions[existingIndex] = prediction;
+        } else {
+            displayPrediction(existing);
+            return;
+        }
+    } else {
+        predictions.push(prediction);
+    }
 
     savePredictions();
 
@@ -278,9 +353,7 @@ function verifyPredictions() {
     let changed = false;
 
     predictions.forEach(prediction => {
-        if (prediction.game !== selectedGame) {
-            return;
-        }
+        if (prediction.game !== selectedGame) return;
 
         const actual = results.find(
             r => r.game === selectedGame &&
@@ -314,9 +387,7 @@ function verifyPredictions() {
         changed = true;
     });
 
-    if (changed) {
-        savePredictions();
-    }
+    if (changed) savePredictions();
 }
 
 // ACCURACY
@@ -325,6 +396,7 @@ function getAccuracy(type) {
         p => p.game === selectedGame &&
              p.settled &&
              p.bigSmall &&
+             p.bigSmall !== "NO CLEAR SIGNAL" &&
              p.actualBigSmall
     );
 
@@ -345,7 +417,7 @@ function getAccuracy(type) {
     ).toFixed(1);
 }
 
-// DISPLAY CURRENT PREDICTION
+// DISPLAY PREDICTION
 function displayPrediction(p) {
     let panel = document.getElementById("predictionPanel");
 
@@ -357,35 +429,63 @@ function displayPrediction(p) {
         document.querySelector("main").appendChild(panel);
     }
 
+    const trend = p.breakdown || {};
+
+    const trend10 = trend[10] || {};
+    const trend30 = trend[30] || {};
+    const trend100 = trend[100] || {};
+
+    const signal =
+        p.bigSmall || "NO CLEAR SIGNAL";
+
     panel.innerHTML = `
-        <h2>ULTRA AI PREDICTION ENGINE</h2>
+        <h2>ULTRA AI WEIGHTED TREND ENGINE</h2>
 
         <h3>UPCOMING PERIOD</h3>
         <p>${p.period}</p>
 
-        <h3>BIG / SMALL ESTIMATE</h3>
-        <p>${p.bigSmall}</p>
+        <h3>BIG / SMALL SIGNAL</h3>
+        <p>${signal}</p>
+
+        <h3>TREND STRENGTH</h3>
+        <p>${p.trendStrength || "N/A"}%</p>
+
+        <h3>WEIGHTED ANALYSIS</h3>
+        <p>BIG: ${p.bigPercent || "N/A"}%</p>
+        <p>SMALL: ${p.smallPercent || "N/A"}%</p>
+
+        <h3>TIMEFRAME BREAKDOWN</h3>
+
+        <p>Last 10:
+        BIG ${trend10.bigPercent || "N/A"}% |
+        SMALL ${trend10.smallPercent || "N/A"}%</p>
+
+        <p>Last 30:
+        BIG ${trend30.bigPercent || "N/A"}% |
+        SMALL ${trend30.smallPercent || "N/A"}%</p>
+
+        <p>Last 100:
+        BIG ${trend100.bigPercent || "N/A"}% |
+        SMALL ${trend100.smallPercent || "N/A"}%</p>
 
         <h3>COLOUR ESTIMATE</h3>
-        <p>${p.colour.replace(",", " + ")}</p>
+        <p>${String(p.colour || "N/A").replace(",", " + ")}</p>
 
         <h3>NUMBER ESTIMATE</h3>
-        <p>${p.number}</p>
-
-        <p>Historical sample: ${p.samples} results</p>
+        <p>${p.number ?? "N/A"}</p>
 
         <hr>
 
         <h3>HISTORICAL ACCURACY</h3>
-        <p>Big / Small: ${getAccuracy("bigSmall")}%</p>
+        <p>Big / Small: ${getAccuracy("bigSmall")}${getAccuracy("bigSmall") === "Not available" ? "" : "%"}</p>
 
         <p>Prediction status:
         ${p.settled ? "RESULT VERIFIED" : "WAITING FOR RESULT"}
         </p>
 
         <small>
-        Historical-frequency estimates do not guarantee
-        future outcomes.
+        Statistical trend analysis only.
+        No guaranteed prediction of random outcomes.
         </small>
     `;
 }
@@ -404,7 +504,7 @@ function displayCurrentPrediction() {
     }
 }
 
-// PREDICTION HISTORY - BIG / SMALL
+// PREDICTION HISTORY
 function renderPredictionHistory() {
     const table = document.getElementById(
         "predictionHistory"
@@ -436,20 +536,23 @@ function renderPredictionHistory() {
             ? p.actualBigSmall
             : "Pending";
 
-        const isWin = p.settled &&
-            p.bigSmall === p.actualBigSmall;
+        let status;
 
-        const status = !p.settled
-            ? "⏳ WAITING"
-            : isWin
-                ? "🟢 WIN"
-                : "🔴 LOSS";
+        if (predicted === "NO CLEAR SIGNAL") {
+            status = "⚪ SKIP";
+        } else if (!p.settled) {
+            status = "⏳ WAITING";
+        } else if (p.bigSmall === p.actualBigSmall) {
+            status = "🟢 WIN";
+        } else {
+            status = "🔴 LOSS";
+        }
 
         return `
             <tr>
                 <td>${p.period}</td>
                 <td>${predicted}</td>
-                <td>${actual}</td>
+                <td>${actual || "Pending"}</td>
                 <td>${status}</td>
             </tr>
         `;
