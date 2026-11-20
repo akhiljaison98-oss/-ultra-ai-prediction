@@ -15,7 +15,11 @@ let predictions = Array.isArray(oldPredictions)
 const WORKER_URL =
 "https://ultra-ai-prediction.akhiljaison98.workers.dev/";
 
-// COMPARE PERIODS
+let backendStatus = "WAITING";
+let backendVersion = "2.0";
+let lastUpdated = "Not available";
+
+// PERIOD COMPARISON
 function comparePeriods(a, b) {
     const x = String(a).replace(/^0+(?=\d)/, "");
     const y = String(b).replace(/^0+(?=\d)/, "");
@@ -27,7 +31,7 @@ function comparePeriods(a, b) {
     return x.localeCompare(y);
 }
 
-// TRIM PREDICTIONS
+// SAVE PREDICTIONS
 function trimPredictions() {
     const games = [...new Set(
         predictions
@@ -38,15 +42,13 @@ function trimPredictions() {
     predictions = games.flatMap(game =>
         predictions
             .filter(p => p && p.game === game && p.period)
-            .slice()
             .sort((a, b) =>
                 comparePeriods(a.period, b.period)
             )
-            .slice(-50)
+            .slice(-100)
     );
 }
 
-// SAVE PREDICTIONS
 function savePredictions() {
     trimPredictions();
 
@@ -73,7 +75,18 @@ function selectGame(game) {
 
 // SAVE RESULTS
 function saveResults() {
-    results = results.slice(-500);
+    const games = [...new Set(
+        results.map(r => r.game)
+    )];
+
+    results = games.flatMap(game =>
+        results
+            .filter(r => r.game === game)
+            .sort((a, b) =>
+                comparePeriods(a.period, b.period)
+            )
+            .slice(-500)
+    );
 
     localStorage.setItem(
         "ultraResults",
@@ -90,7 +103,7 @@ async function fetchWingoResults() {
 
     try {
         document.getElementById("message").innerText =
-            "Fetching live results...";
+            "Connecting to ULTRA AI backend...";
 
         const response = await fetch(
             WORKER_URL + "?game=" + gameCode
@@ -106,6 +119,14 @@ async function fetchWingoResults() {
             !Array.isArray(data.history)) {
             throw new Error("Invalid API response");
         }
+
+        backendStatus = "CONNECTED";
+
+        backendVersion =
+            data.analysis?.version || "2.0";
+
+        lastUpdated =
+            data.stats?.last_updated || new Date().toISOString();
 
         [...data.history].reverse().forEach(item => {
             const period = String(item.issueNumber);
@@ -143,8 +164,12 @@ async function fetchWingoResults() {
             data.current.issueNumber;
 
     } catch (error) {
+        backendStatus = "CONNECTION ERROR";
+
         document.getElementById("message").innerText =
             "Connection error: " + error.message;
+
+        updateEngineStatus();
     }
 }
 
@@ -156,7 +181,7 @@ function getColour(number) {
     return number % 2 === 1 ? "GREEN" : "RED";
 }
 
-// BIG / SMALL CLASSIFICATION
+// BIG / SMALL
 function getBigSmall(number) {
     return Number(number) >= 5 ? "BIG" : "SMALL";
 }
@@ -180,12 +205,60 @@ function nextPeriod(period) {
     return digits.join("");
 }
 
+// STREAK AND ALTERNATION ANALYSIS
+function analysePatterns(filtered) {
+    if (!filtered.length) {
+        return {
+            streakType: "N/A",
+            streakLength: 0,
+            alternations: 0
+        };
+    }
+
+    const ordered = filtered.slice().sort(
+        (a, b) => comparePeriods(a.period, b.period)
+    );
+
+    const latestType =
+        getBigSmall(ordered[ordered.length - 1].number);
+
+    let streakLength = 0;
+
+    for (let i = ordered.length - 1; i >= 0; i--) {
+        if (getBigSmall(ordered[i].number) === latestType) {
+            streakLength++;
+        } else {
+            break;
+        }
+    }
+
+    const recent = ordered.slice(-100);
+
+    let alternations = 0;
+
+    for (let i = 1; i < recent.length; i++) {
+        if (
+            getBigSmall(recent[i].number) !==
+            getBigSmall(recent[i - 1].number)
+        ) {
+            alternations++;
+        }
+    }
+
+    return {
+        streakType: latestType,
+        streakLength,
+        alternations
+    };
+}
+
 // WEIGHTED TREND ENGINE
 function analyseWeightedTrend(filtered) {
     const windows = [
-        { size: 10, weight: 0.50 },
+        { size: 10, weight: 0.40 },
         { size: 30, weight: 0.30 },
-        { size: 100, weight: 0.20 }
+        { size: 50, weight: 0.20 },
+        { size: 100, weight: 0.10 }
     ];
 
     let bigScore = 0;
@@ -277,13 +350,16 @@ function generatePrediction() {
 
     if (!trend) return;
 
+    const patterns = analysePatterns(filtered);
+
     const existingIndex = predictions.findIndex(
         p => p.game === selectedGame &&
              String(p.period) === targetPeriod
     );
 
-    // NUMBER FREQUENCY
+    // NUMBER AND COLOUR FREQUENCY
     const sample = filtered.slice(-100);
+
     const numbers = Array(10).fill(0);
 
     const colours = {
@@ -324,6 +400,9 @@ function generatePrediction() {
         bigPercent: trend.bigPercent,
         smallPercent: trend.smallPercent,
         breakdown: trend.breakdown,
+        streakType: patterns.streakType,
+        streakLength: patterns.streakLength,
+        alternations: patterns.alternations,
         settled: false,
         createdAt: new Date().toISOString()
     };
@@ -331,7 +410,6 @@ function generatePrediction() {
     if (existingIndex !== -1) {
         const existing = predictions[existingIndex];
 
-        // Update old pending predictions with the new engine.
         if (!existing.settled) {
             predictions[existingIndex] = prediction;
         } else {
@@ -353,7 +431,8 @@ function verifyPredictions() {
     let changed = false;
 
     predictions.forEach(prediction => {
-        if (prediction.game !== selectedGame) return;
+        if (prediction.game !== selectedGame ||
+            prediction.settled) return;
 
         const actual = results.find(
             r => r.game === selectedGame &&
@@ -382,7 +461,7 @@ function verifyPredictions() {
         prediction.settled = true;
 
         prediction.settledAt =
-            prediction.settledAt || new Date().toISOString();
+            new Date().toISOString();
 
         changed = true;
     });
@@ -395,7 +474,6 @@ function getAccuracy(type) {
     const records = predictions.filter(
         p => p.game === selectedGame &&
              p.settled &&
-             p.bigSmall &&
              p.bigSmall !== "NO CLEAR SIGNAL" &&
              p.actualBigSmall
     );
@@ -417,6 +495,35 @@ function getAccuracy(type) {
     ).toFixed(1);
 }
 
+// ENGINE STATUS
+function updateEngineStatus() {
+    let panel = document.getElementById("engineStatus");
+
+    if (!panel) {
+        panel = document.createElement("section");
+        panel.id = "engineStatus";
+        panel.className = "card";
+
+        document.querySelector("main").prepend(panel);
+    }
+
+    const gameResults = results.filter(
+        r => r.game === selectedGame
+    );
+
+    panel.innerHTML = `
+        <h2>ULTRA AI PRO ENGINE</h2>
+        <p>Backend: ${backendStatus}</p>
+        <p>Engine Version: ${backendVersion}</p>
+        <p>Selected Game: ${selectedGame || "None"}</p>
+        <p>Stored Results: ${gameResults.length}</p>
+        <p>Last Updated: ${lastUpdated}</p>
+        <small>
+        Analysis uses locally accumulated historical results.
+        </small>
+    `;
+}
+
 // DISPLAY PREDICTION
 function displayPrediction(p) {
     let panel = document.getElementById("predictionPanel");
@@ -431,12 +538,21 @@ function displayPrediction(p) {
 
     const trend = p.breakdown || {};
 
-    const trend10 = trend[10] || {};
-    const trend30 = trend[30] || {};
-    const trend100 = trend[100] || {};
+    const signal = p.bigSmall || "NO CLEAR SIGNAL";
 
-    const signal =
-        p.bigSmall || "NO CLEAR SIGNAL";
+    function windowText(size) {
+        const item = trend[size];
+
+        if (!item) {
+            return "Not enough data";
+        }
+
+        return `
+            BIG ${item.bigPercent}% |
+            SMALL ${item.smallPercent}%
+            (${item.total} results)
+        `;
+    }
 
     panel.innerHTML = `
         <h2>ULTRA AI WEIGHTED TREND ENGINE</h2>
@@ -455,37 +571,37 @@ function displayPrediction(p) {
         <p>SMALL: ${p.smallPercent || "N/A"}%</p>
 
         <h3>TIMEFRAME BREAKDOWN</h3>
+        <p>Last 10: ${windowText(10)}</p>
+        <p>Last 30: ${windowText(30)}</p>
+        <p>Last 50: ${windowText(50)}</p>
+        <p>Last 100: ${windowText(100)}</p>
 
-        <p>Last 10:
-        BIG ${trend10.bigPercent || "N/A"}% |
-        SMALL ${trend10.smallPercent || "N/A"}%</p>
-
-        <p>Last 30:
-        BIG ${trend30.bigPercent || "N/A"}% |
-        SMALL ${trend30.smallPercent || "N/A"}%</p>
-
-        <p>Last 100:
-        BIG ${trend100.bigPercent || "N/A"}% |
-        SMALL ${trend100.smallPercent || "N/A"}%</p>
+        <h3>PATTERN ANALYSIS</h3>
+        <p>Current streak: ${p.streakType || "N/A"} × ${p.streakLength || 0}</p>
+        <p>Alternations: ${p.alternations ?? "N/A"}</p>
 
         <h3>COLOUR ESTIMATE</h3>
         <p>${String(p.colour || "N/A").replace(",", " + ")}</p>
 
-        <h3>NUMBER ESTIMATE</h3>
+        <h3>NUMBER FREQUENCY ESTIMATE</h3>
         <p>${p.number ?? "N/A"}</p>
 
         <hr>
 
         <h3>HISTORICAL ACCURACY</h3>
-        <p>Big / Small: ${getAccuracy("bigSmall")}${getAccuracy("bigSmall") === "Not available" ? "" : "%"}</p>
+        <p>BIG / SMALL: ${
+            getAccuracy("bigSmall") === "Not available"
+            ? "Not available"
+            : getAccuracy("bigSmall") + "%"
+        }</p>
 
-        <p>Prediction status:
+        <p>Prediction Status:
         ${p.settled ? "RESULT VERIFIED" : "WAITING FOR RESULT"}
         </p>
 
         <small>
-        Statistical trend analysis only.
-        No guaranteed prediction of random outcomes.
+        Statistical analysis only. Random outcomes cannot be
+        reliably predicted or guaranteed.
         </small>
     `;
 }
@@ -494,7 +610,6 @@ function displayPrediction(p) {
 function displayCurrentPrediction() {
     const existing = predictions
         .filter(p => p.game === selectedGame && !p.settled)
-        .slice()
         .sort((a, b) =>
             comparePeriods(b.period, a.period)
         )[0];
@@ -514,7 +629,6 @@ function renderPredictionHistory() {
 
     const history = predictions
         .filter(p => p.game === selectedGame)
-        .slice()
         .sort((a, b) =>
             comparePeriods(b.period, a.period)
         )
@@ -579,9 +693,11 @@ function showPredictionMessage(message) {
 
 // MAIN DASHBOARD
 function updateDashboard() {
-    const filtered = results.filter(
-        r => r.game === selectedGame
-    );
+    const filtered = results
+        .filter(r => r.game === selectedGame)
+        .sort((a, b) =>
+            comparePeriods(a.period, b.period)
+        );
 
     const total = filtered.length;
 
@@ -617,6 +733,7 @@ function updateDashboard() {
 
     updateColourDashboard(filtered);
     updateTrendAnalysis(filtered);
+    updateEngineStatus();
 }
 
 // COLOUR STATISTICS
@@ -673,34 +790,20 @@ function updateTrendAnalysis(filtered) {
         return;
     }
 
-    let bigCount = 0;
-    let smallCount = 0;
-    let longestStreak = 1;
-    let currentStreak = 1;
+    const patterns = analysePatterns(filtered);
 
-    for (let i = 0; i < recent.length; i++) {
-        if (recent[i].number >= 5) bigCount++;
-        else smallCount++;
+    const bigCount = recent.filter(
+        r => getBigSmall(r.number) === "BIG"
+    ).length;
 
-        if (i > 0) {
-            const previous = recent[i - 1].number >= 5;
-            const current = recent[i].number >= 5;
-
-            if (previous === current) currentStreak++;
-            else currentStreak = 1;
-
-            longestStreak = Math.max(
-                longestStreak,
-                currentStreak
-            );
-        }
-    }
+    const smallCount = recent.length - bigCount;
 
     panel.innerHTML = `
         <h2>AI TREND MONITOR</h2>
-        <p>Last 10 Big: ${bigCount}</p>
-        <p>Last 10 Small: ${smallCount}</p>
-        <p>Longest streak: ${longestStreak}</p>
+        <p>Last 10 BIG: ${bigCount}</p>
+        <p>Last 10 SMALL: ${smallCount}</p>
+        <p>Current streak: ${patterns.streakType} × ${patterns.streakLength}</p>
+        <p>Alternations (last 100): ${patterns.alternations}</p>
     `;
 }
 
