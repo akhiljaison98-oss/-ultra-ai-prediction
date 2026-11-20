@@ -4,6 +4,10 @@ let results = JSON.parse(
     localStorage.getItem("ultraResults") || "[]"
 );
 
+let predictions = JSON.parse(
+    localStorage.getItem("ultraPredictions") || "{}"
+);
+
 const WORKER_URL =
 "https://ultra-ai-prediction.akhiljaison98.workers.dev/";
 
@@ -18,17 +22,35 @@ function selectGame(game) {
     fetchWingoResults();
 }
 
-// ADD MANUAL RESULT
+// SAVE DATA
+function saveResults() {
+    results = results.slice(-500);
+
+    localStorage.setItem(
+        "ultraResults",
+        JSON.stringify(results)
+    );
+}
+
+function savePredictions() {
+    localStorage.setItem(
+        "ultraPredictions",
+        JSON.stringify(predictions)
+    );
+}
+
+// MANUAL RESULT
 function addResult() {
     const input = document.getElementById("numberInput");
     const number = Number(input.value);
 
     if (!selectedGame) {
-        alert("Please select a game first!");
+        alert("Select a game first!");
         return;
     }
 
-    if (input.value === "" || !Number.isInteger(number) ||
+    if (input.value === "" ||
+        !Number.isInteger(number) ||
         number < 0 || number > 9) {
         alert("Enter a number between 0 and 9");
         return;
@@ -43,23 +65,10 @@ function addResult() {
     saveResults();
     input.value = "";
 
-    document.getElementById("message").innerText =
-        "Result added successfully!";
-
     updateDashboard();
 }
 
-// SAVE RESULTS
-function saveResults() {
-    results = results.slice(-500);
-
-    localStorage.setItem(
-        "ultraResults",
-        JSON.stringify(results)
-    );
-}
-
-// FETCH LIVE WINGO RESULTS
+// FETCH LIVE RESULTS
 async function fetchWingoResults() {
     if (!selectedGame) return;
 
@@ -67,21 +76,18 @@ async function fetchWingoResults() {
         selectedGame === "30 Seconds" ? "30s" : "1m";
 
     try {
-        document.getElementById("message").innerText =
-            "Fetching live results...";
-
         const response = await fetch(
             WORKER_URL + "?game=" + gameCode
         );
 
         if (!response.ok) {
-            throw new Error("API error " + response.status);
+            throw new Error("API error");
         }
 
         const data = await response.json();
 
         if (!data.success || !Array.isArray(data.history)) {
-            throw new Error("Invalid API data");
+            throw new Error("Invalid API response");
         }
 
         [...data.history].reverse().forEach(item => {
@@ -103,16 +109,262 @@ async function fetchWingoResults() {
         });
 
         saveResults();
+
+        verifyPredictions();
+        generatePrediction();
         updateDashboard();
 
         document.getElementById("message").innerText =
-            "LIVE CONNECTED | Period: " +
-            data.current.issueNumber;
+            "LIVE CONNECTED | " + data.current.issueNumber;
 
     } catch (error) {
         document.getElementById("message").innerText =
             "Connection error: " + error.message;
     }
+}
+
+// COLOUR CLASSIFICATION
+function getColour(number) {
+    if (number === 0) return "RED,VIOLET";
+    if (number === 5) return "GREEN,VIOLET";
+
+    return number % 2 === 1 ? "GREEN" : "RED";
+}
+
+// NEXT PERIOD NUMBER
+function nextPeriod(period) {
+    if (!period || !/^\d+$/.test(period)) return "";
+
+    const digits = period.split("");
+    let carry = 1;
+
+    for (let i = digits.length - 1; i >= 0 && carry; i--) {
+        const value = Number(digits[i]) + carry;
+        digits[i] = String(value % 10);
+        carry = value > 9 ? 1 : 0;
+    }
+
+    if (carry) digits.unshift("1");
+
+    return digits.join("");
+}
+
+// PREDICTION ENGINE
+function generatePrediction() {
+    const filtered = results
+        .filter(r =>
+            r.game === selectedGame &&
+            r.period &&
+            Number.isInteger(r.number)
+        )
+        .sort((a, b) =>
+            a.period.localeCompare(b.period)
+        );
+
+    if (filtered.length < 10) {
+        showPredictionMessage(
+            "Collect at least 10 completed results."
+        );
+        return;
+    }
+
+    const latest = filtered[filtered.length - 1];
+
+    const targetPeriod = nextPeriod(latest.period);
+
+    const existing = predictions[selectedGame];
+
+    // Keep an existing pending prediction
+    if (existing &&
+        existing.period === targetPeriod &&
+        !existing.settled) {
+        displayPrediction(existing);
+        return;
+    }
+
+    const sample = filtered.slice(-100);
+
+    const numbers = Array(10).fill(0);
+
+    let big = 0;
+    let small = 0;
+
+    const colours = {
+        "GREEN": 0,
+        "RED": 0,
+        "RED,VIOLET": 0,
+        "GREEN,VIOLET": 0
+    };
+
+    sample.forEach(item => {
+        numbers[item.number]++;
+
+        if (item.number >= 5) big++;
+        else small++;
+
+        const colour = item.colour ||
+            getColour(item.number);
+
+        if (colours[colour] !== undefined) {
+            colours[colour]++;
+        }
+    });
+
+    const total = sample.length;
+
+    const numberPrediction = numbers.indexOf(
+        Math.max(...numbers)
+    );
+
+    const bigPrediction = big >= small ? "BIG" : "SMALL";
+
+    const colourPrediction = Object.keys(colours).reduce(
+        (a, b) => colours[a] >= colours[b] ? a : b
+    );
+
+    const bigShare = Math.max(big, small) / total;
+
+    const numberShare =
+        numbers[numberPrediction] / total;
+
+    const prediction = {
+        period: targetPeriod,
+        number: numberPrediction,
+        bigSmall: bigPrediction,
+        colour: colourPrediction,
+        samples: total,
+        historicalBigSmallShare: bigShare,
+        historicalNumberShare: numberShare,
+        settled: false,
+        createdAt: new Date().toISOString()
+    };
+
+    predictions[selectedGame] = prediction;
+
+    savePredictions();
+    displayPrediction(prediction);
+}
+
+// DISPLAY PREDICTION
+function displayPrediction(p) {
+    let panel = document.getElementById("predictionPanel");
+
+    if (!panel) {
+        panel = document.createElement("section");
+        panel.id = "predictionPanel";
+        panel.className = "card";
+
+        document.querySelector("main").appendChild(panel);
+    }
+
+    const bigSmallAccuracy = getAccuracy("bigSmall");
+    const colourAccuracy = getAccuracy("colour");
+    const numberAccuracy = getAccuracy("number");
+
+    panel.innerHTML = `
+        <h2>ULTRA AI PREDICTION ENGINE</h2>
+
+        <h3>UPCOMING PERIOD</h3>
+        <p>${p.period}</p>
+
+        <h3>BIG / SMALL ESTIMATE</h3>
+        <p>${p.bigSmall}</p>
+
+        <h3>COLOUR ESTIMATE</h3>
+        <p>${p.colour.replace(",", " + ")}</p>
+
+        <h3>NUMBER ESTIMATE</h3>
+        <p>${p.number}</p>
+
+        <p>Historical sample: ${p.samples} results</p>
+
+        <hr>
+
+        <h3>HISTORICAL ACCURACY TRACKER</h3>
+        <p>Big / Small: ${bigSmallAccuracy}%</p>
+        <p>Colour: ${colourAccuracy}%</p>
+        <p>Exact Number: ${numberAccuracy}%</p>
+
+        <p>
+            Prediction status:
+            ${p.settled ? "RESULT VERIFIED" : "WAITING FOR RESULT"}
+        </p>
+
+        <small>
+            Estimates are based on historical frequencies.
+            They do not guarantee future outcomes.
+        </small>
+    `;
+}
+
+// VERIFY PREDICTIONS
+function verifyPredictions() {
+    const prediction = predictions[selectedGame];
+
+    if (!prediction || prediction.settled) return;
+
+    const actual = results.find(
+        r => r.game === selectedGame &&
+             r.period === prediction.period
+    );
+
+    if (!actual) return;
+
+    const actualColour =
+        actual.colour || getColour(actual.number);
+
+    prediction.actualNumber = actual.number;
+
+    prediction.actualBigSmall =
+        actual.number >= 5 ? "BIG" : "SMALL";
+
+    prediction.actualColour = actualColour;
+
+    prediction.numberCorrect =
+        prediction.number === actual.number;
+
+    prediction.bigSmallCorrect =
+        prediction.bigSmall === prediction.actualBigSmall;
+
+    prediction.colourCorrect =
+        prediction.colour === actualColour;
+
+    prediction.settled = true;
+
+    savePredictions();
+}
+
+// ACCURACY CALCULATION
+function getAccuracy(type) {
+    const records = Object.values(predictions)
+        .filter(p => p.settled);
+
+    if (!records.length) return "Not available";
+
+    const correct = records.filter(p => {
+        if (type === "number") return p.numberCorrect;
+        if (type === "bigSmall") return p.bigSmallCorrect;
+        return p.colourCorrect;
+    }).length;
+
+    return (correct / records.length * 100).toFixed(1);
+}
+
+// PREDICTION MESSAGE
+function showPredictionMessage(message) {
+    let panel = document.getElementById("predictionPanel");
+
+    if (!panel) {
+        panel = document.createElement("section");
+        panel.id = "predictionPanel";
+        panel.className = "card";
+        document.querySelector("main").appendChild(panel);
+    }
+
+    panel.innerHTML = `
+        <h2>ULTRA AI PREDICTION ENGINE</h2>
+        <p>${message}</p>
+    `;
 }
 
 // MAIN DASHBOARD
@@ -153,14 +405,14 @@ function updateDashboard() {
     updateTrendAnalysis(filtered);
 }
 
-// COLOUR ANALYSIS
+// COLOUR STATISTICS
 function updateColourDashboard(filtered) {
     let green = 0;
     let red = 0;
     let violet = 0;
 
     filtered.forEach(item => {
-        const colour = item.colour || "";
+        const colour = item.colour || getColour(item.number);
 
         if (colour.includes("GREEN")) green++;
         if (colour.includes("RED")) red++;
@@ -200,8 +452,7 @@ function updateTrendAnalysis(filtered) {
     if (recent.length < 10) {
         panel.innerHTML = `
             <h2>AI TREND MONITOR</h2>
-            <h3>INSUFFICIENT DATA</h3>
-            <p>Collect at least 10 results for analysis.</p>
+            <p>Collect at least 10 results.</p>
         `;
         return;
     }
@@ -229,32 +480,17 @@ function updateTrendAnalysis(filtered) {
         }
     }
 
-    let status = "STABLE PATTERN";
-
-    if (longestStreak >= 7 ||
-        bigCount >= 8 || smallCount >= 8) {
-        status = "BAD TREND";
-    } else if (longestStreak >= 5) {
-        status = "CAUTION";
-    }
-
     panel.innerHTML = `
         <h2>AI TREND MONITOR</h2>
-        <h3>${status}</h3>
         <p>Last 10 Big: ${bigCount}</p>
         <p>Last 10 Small: ${smallCount}</p>
         <p>Longest streak: ${longestStreak}</p>
-        <p>Past patterns do not reliably predict future results.</p>
     `;
 }
 
-// AUTOMATIC REFRESH EVERY 30 SECONDS
+// AUTO REFRESH
 setInterval(() => {
     if (selectedGame) {
         fetchWingoResults();
     }
-}, 30000);
-    
-        
-    
-            
+}, 10000);
