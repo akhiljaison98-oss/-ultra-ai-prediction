@@ -24,29 +24,13 @@
 
 <section class="card">
 <h2>GAME SELECTOR</h2>
-
-<button onclick="selectGame('30 Seconds')">
-WINGO 30 SEC
-</button>
-
-<button onclick="selectGame('1 Minute')">
-WINGO 1 MIN
-</button>
-
+<button onclick="selectGame('30 Seconds')">WINGO 30 SEC</button>
+<button onclick="selectGame('1 Minute')">WINGO 1 MIN</button>
 <p id="game">Select game period</p>
 </section>
 
 <section class="card">
-<h2>ENTER GAME RESULT</h2>
-
-<input type="number"
-id="numberInput"
-min="0"
-max="9"
-placeholder="Enter number (0-9)">
-
-<button onclick="addResult()">ADD RESULT</button>
-
+<h2>LIVE CONNECTION</h2>
 <p id="message">Waiting for results...</p>
 </section>
 
@@ -59,21 +43,43 @@ placeholder="Enter number (0-9)">
 
 <h3>Number Frequency</h3>
 <div id="frequency"></div>
-<h3>COLOUR ANALYSIS</h3>
 
+<h3>COLOUR ANALYSIS</h3>
 <div class="colour-stats">
-    <p>🟢 Green: <span id="green">0</span></p>
-    <p>🔴 Red: <span id="red">0</span></p>
-    <p>🟣 Violet: <span id="violet">0</span></p>
+<p>🟢 Green: <span id="green">0</span></p>
+<p>🔴 Red: <span id="red">0</span></p>
+<p>🟣 Violet: <span id="violet">0</span></p>
 </div>
 
 <h3>BIG / SMALL PERCENTAGE</h3>
-
 <p>Big: <span id="bigPercent">0%</span></p>
 <p>Small: <span id="smallPercent">0%</span></p>
+
 <h3>Recent Results</h3>
 <div id="history"></div>
+</section>
 
+<section class="card">
+<h2>PREDICTION HISTORY</h2>
+<p>Latest 50 periods</p>
+
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>Period Number</th>
+<th>Predicted</th>
+<th>Actual</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody id="predictionHistory">
+<tr>
+<td colspan="4">Waiting for predictions...</td>
+</tr>
+</tbody>
+</table>
+</div>
 </section>
 
 </main>
