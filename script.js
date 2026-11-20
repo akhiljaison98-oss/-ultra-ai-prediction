@@ -16,10 +16,38 @@ let predictions = Array.isArray(oldPredictions)
 const WORKER_URL =
 "https://ultra-ai-prediction.akhiljaison98.workers.dev/";
 
-predictions = predictions
-    .filter(p => p && p.period && p.game)
-    .slice(-50);
+// Compare period numbers safely, even when they are very large
+function comparePeriods(a, b) {
+    const x = String(a).replace(/^0+(?=\d)/, "");
+    const y = String(b).replace(/^0+(?=\d)/, "");
 
+    if (x.length !== y.length) {
+        return x.length - y.length;
+    }
+
+    return x.localeCompare(y);
+}
+
+// Keep only the latest 50 predictions for each game
+function trimPredictions() {
+    const games = [...new Set(
+        predictions
+            .filter(p => p && p.period && p.game)
+            .map(p => p.game)
+    )];
+
+    predictions = games.flatMap(game =>
+        predictions
+            .filter(p => p && p.game === game && p.period)
+            .slice()
+            .sort((a, b) =>
+                comparePeriods(a.period, b.period)
+            )
+            .slice(-50)
+    );
+}
+
+trimPredictions();
 savePredictions();
 
 // SELECT GAME
@@ -47,7 +75,7 @@ function saveResults() {
 
 // SAVE PREDICTIONS
 function savePredictions() {
-    predictions = predictions.slice(-50);
+    trimPredictions();
 
     localStorage.setItem(
         "ultraPredictions",
@@ -155,8 +183,9 @@ function generatePrediction() {
             r.number >= 0 &&
             r.number <= 9
         )
+        .slice()
         .sort((a, b) =>
-            String(a.period).localeCompare(String(b.period))
+            comparePeriods(a.period, b.period)
         );
 
     if (filtered.length < 10) {
@@ -359,8 +388,9 @@ function displayPrediction(p) {
 function displayCurrentPrediction() {
     const existing = predictions
         .filter(p => p.game === selectedGame && !p.settled)
+        .slice()
         .sort((a, b) =>
-            String(b.period).localeCompare(String(a.period))
+            comparePeriods(b.period, a.period)
         )[0];
 
     if (existing) {
@@ -379,7 +409,9 @@ function renderPredictionHistory() {
     const history = predictions
         .filter(p => p.game === selectedGame)
         .slice()
-        .reverse()
+        .sort((a, b) =>
+            comparePeriods(b.period, a.period)
+        )
         .slice(0, 50);
 
     if (!history.length) {
@@ -392,16 +424,15 @@ function renderPredictionHistory() {
     }
 
     table.innerHTML = history.map(p => {
-        let actual = "Pending";
-        let status = "⏳ WAITING";
+        const actual = p.settled
+            ? p.actualNumber
+            : "Pending";
 
-        if (p.settled) {
-            actual = p.actualNumber;
-
-            status = p.numberCorrect
+        const status = !p.settled
+            ? "⏳ WAITING"
+            : p.numberCorrect
                 ? "🟢 WIN"
                 : "🔴 LOSS";
-        }
 
         return `
             <tr>
