@@ -1,42 +1,43 @@
-// ==========================================
+// ============================================
 // ULTRA AI PRO - COMPLETE SCRIPT
-// History-preserving verification upgrade
-// ==========================================
+// Version 3.0
+// ============================================
 
 let selectedGame = "";
+let fetching = false;
+
+const WORKER_URL =
+"https://ultra-ai-prediction.akhiljaison98.workers.dev/";
+
+// ============================================
+// STORAGE
+// ============================================
 
 function safeParse(key, fallback) {
     try {
         const value = localStorage.getItem(key);
         return value ? JSON.parse(value) : fallback;
     } catch (error) {
-        console.error("Storage read error:", key, error);
+        console.error("Storage error:", error);
         return fallback;
     }
 }
 
 let results = safeParse("ultraResults", []);
 
-if (!Array.isArray(results)) results = [];
+if (!Array.isArray(results)) {
+    results = [];
+}
 
-const oldPredictions = safeParse("ultraPredictions", []);
+let oldPredictions = safeParse("ultraPredictions", []);
 
 let predictions = Array.isArray(oldPredictions)
     ? oldPredictions
     : Object.values(oldPredictions || {}).filter(Boolean);
 
-const WORKER_URL =
-    "https://ultra-ai-prediction.akhiljaison98.workers.dev/";
-
-let backendStatus = "WAITING";
-let backendVersion = "2.0";
-let lastUpdated = "Not available";
-
-let fetching = false;
-
-// ==========================================
+// ============================================
 // HELPERS
-// ==========================================
+// ============================================
 
 function escapeHTML(value) {
     return String(value ?? "").replace(/[&<>"']/g, char => ({
@@ -48,23 +49,12 @@ function escapeHTML(value) {
     })[char]);
 }
 
-function comparePeriods(a, b) {
-    const x = String(a ?? "").replace(/^0+(?=\d)/, "");
-    const y = String(b ?? "").replace(/^0+(?=\d)/, "");
-
-    if (/^\d+$/.test(x) && /^\d+$/.test(y)) {
-        if (x.length !== y.length) {
-            return x.length - y.length;
-        }
-
-        return x.localeCompare(y);
-    }
-
-    return x.localeCompare(y);
-}
-
 function getGameCode(game) {
     return game === "30 Seconds" ? "30s" : "1m";
+}
+
+function getBigSmall(number) {
+    return Number(number) >= 5 ? "BIG" : "SMALL";
 }
 
 function getColour(number) {
@@ -73,173 +63,176 @@ function getColour(number) {
     if (number === 0) return "RED,VIOLET";
     if (number === 5) return "GREEN,VIOLET";
 
-    return number % 2 === 1 ? "GREEN" : "RED";
+    return number % 2 === 0 ? "RED" : "GREEN";
 }
 
-function getBigSmall(number) {
-    return Number(number) >= 5 ? "BIG" : "SMALL";
+function comparePeriods(a, b) {
+    const x = String(a ?? "");
+    const y = String(b ?? "");
+
+    if (/^\d+$/.test(x) && /^\d+$/.test(y)) {
+        const bx = BigInt(x);
+        const by = BigInt(y);
+
+        return bx < by ? -1 : bx > by ? 1 : 0;
+    }
+
+    return x.localeCompare(y);
 }
 
 function nextPeriod(period) {
-    if (!period || !/^\d+$/.test(String(period))) {
+    if (!/^\d+$/.test(String(period))) {
         return "";
     }
 
-    const digits = String(period).split("");
-    let carry = 1;
-
-    for (let i = digits.length - 1; i >= 0 && carry; i--) {
-        const value = Number(digits[i]) + carry;
-
-        digits[i] = String(value % 10);
-        carry = value > 9 ? 1 : 0;
-    }
-
-    if (carry) digits.unshift("1");
-
-    return digits.join("");
+    return (BigInt(period) + 1n).toString();
 }
 
-// ==========================================
-// STORAGE
-// ==========================================
+function getElement(id) {
+    return document.getElementById(id);
+}
 
-function trimPredictions() {
-    const validGames = [...new Set(
-        predictions
-            .filter(p => p && p.game && p.period)
-            .map(p => p.game)
-    )];
+function setText(id, value) {
+    const element = getElement(id);
 
-    const validRecords = validGames.flatMap(game => {
-        return predictions
-            .filter(p => p && p.game === game && p.period)
-            .sort((a, b) => comparePeriods(a.period, b.period))
-            .slice(-500);
+    if (element) {
+        element.textContent = value;
+    }
+}
+
+// ============================================
+// SAVE DATA
+// ============================================
+
+function saveResults() {
+    const unique = new Map();
+
+    results.forEach(item => {
+        if (!item || !item.game || !item.period) return;
+
+        const key = item.game + "_" + item.period;
+
+        unique.set(key, item);
     });
 
-    // Preserve any legacy records that cannot be grouped.
-    const legacyRecords = predictions.filter(
-        p => !p || !p.game || !p.period
-    );
+    results = Array.from(unique.values());
 
-    predictions = [...legacyRecords, ...validRecords];
+    results.sort((a, b) => comparePeriods(a.period, b.period));
+
+    results = results.slice(-1000);
+
+    localStorage.setItem(
+        "ultraResults",
+        JSON.stringify(results)
+    );
 }
 
 function savePredictions() {
-    try {
-        trimPredictions();
+    const unique = new Map();
 
-        localStorage.setItem(
-            "ultraPredictions",
-            JSON.stringify(predictions)
-        );
-    } catch (error) {
-        console.error("Could not save predictions:", error);
-        showPredictionMessage(
-            "Storage error. Your browser may be running out of storage."
-        );
-    }
-}
+    predictions.forEach(item => {
+        if (!item || !item.game || !item.period) return;
 
-function saveResults() {
-    const games = [...new Set(
-        results.filter(r => r && r.game).map(r => r.game)
-    )];
+        const key = item.game + "_" + item.period;
 
-    results = games.flatMap(game =>
-        results
-            .filter(r => r && r.game === game)
-            .sort((a, b) => comparePeriods(a.period, b.period))
-            .slice(-500)
+        unique.set(key, item);
+    });
+
+    predictions = Array.from(unique.values());
+
+    predictions.sort((a, b) => comparePeriods(a.period, b.period));
+
+    predictions = predictions.slice(-1000);
+
+    localStorage.setItem(
+        "ultraPredictions",
+        JSON.stringify(predictions)
     );
-
-    try {
-        localStorage.setItem(
-            "ultraResults",
-            JSON.stringify(results)
-        );
-    } catch (error) {
-        console.error("Could not save results:", error);
-    }
 }
 
-// Save migrated prediction format without changing storage keys.
-savePredictions();
-
-// ==========================================
+// ============================================
 // GAME SELECTION
-// ==========================================
+// ============================================
 
 function selectGame(game) {
-    selectedGame = game;
 
-    const gameLabel = document.getElementById("game");
-
-    if (gameLabel) {
-        gameLabel.innerText = "Selected: Wingo " + game;
+    if (
+        game !== "30 Seconds" &&
+        game !== "1 Minute"
+    ) {
+        return;
     }
 
+    selectedGame = game;
+
+    setText("game", "Selected: Wingo " + game);
+
     updateDashboard();
-    displayCurrentPrediction();
     renderPredictionHistory();
 
     fetchWingoResults();
 }
 
-// ==========================================
-// FETCH LIVE RESULTS
-// ==========================================
+// ============================================
+// FETCH CLOUDFARE RESULTS
+// ============================================
 
 async function fetchWingoResults() {
+
     if (!selectedGame || fetching) return;
 
     fetching = true;
 
     const gameAtRequest = selectedGame;
+
     const gameCode = getGameCode(gameAtRequest);
 
-    const message = document.getElementById("message");
+    setText(
+        "message",
+        "Connecting to ULTRA AI backend..."
+    );
 
     try {
-        if (message) {
-            message.innerText = "Connecting to ULTRA AI backend...";
-        }
 
         const response = await fetch(
             WORKER_URL + "?game=" + gameCode,
-            { cache: "no-store" }
+            {
+                method: "GET",
+                cache: "no-store"
+            }
         );
 
         if (!response.ok) {
-            throw new Error("API error: " + response.status);
+            throw new Error("Server error: " + response.status);
         }
 
         const data = await response.json();
 
-        if (!data.success || !Array.isArray(data.history)) {
-            throw new Error("Invalid API response");
+        if (
+            !data.success ||
+            !Array.isArray(data.history)
+        ) {
+            throw new Error("Invalid server response");
         }
 
-        // Ignore response if the user changed games meanwhile.
-        if (selectedGame !== gameAtRequest) return;
+        if (selectedGame !== gameAtRequest) {
+            return;
+        }
 
-        backendStatus = "CONNECTED";
+        // Add results to local history
 
-        backendVersion =
-            data.analysis?.version || "2.0";
+        data.history.forEach(item => {
 
-        lastUpdated =
-            data.stats?.last_updated || new Date().toISOString();
-
-        [...data.history].reverse().forEach(item => {
             const period = String(item.issueNumber ?? "");
+
             const number = Number(item.number);
 
-            if (!period ||
+            if (
+                !period ||
                 !Number.isInteger(number) ||
                 number < 0 ||
-                number > 9) {
+                number > 9
+            ) {
                 return;
             }
 
@@ -249,12 +242,12 @@ async function fetchWingoResults() {
             );
 
             if (!exists) {
+
                 results.push({
-                    number,
                     game: gameAtRequest,
-                    period,
+                    period: period,
+                    number: number,
                     colour: item.colour || getColour(number),
-                    premium: item.premium,
                     time: new Date().toISOString()
                 });
             }
@@ -270,82 +263,119 @@ async function fetchWingoResults() {
 
         renderPredictionHistory();
 
-        if (message) {
-            message.innerText =
-                "LIVE CONNECTED | Period: " +
-                (data.current?.issueNumber || "Available");
-        }
+        const latest = getGameResults(gameAtRequest);
+
+        const latestResult = latest[latest.length - 1];
+
+        const currentPeriod =
+            data.current?.issueNumber || "Available";
+
+        setText(
+            "message",
+            "LIVE CONNECTED | Current Period: " +
+            currentPeriod +
+            (latestResult
+                ? " | Latest Result: " + latestResult.number
+                : "")
+        );
 
     } catch (error) {
-        backendStatus = "CONNECTION ERROR";
 
-        if (message && selectedGame === gameAtRequest) {
-            message.innerText =
-                "Connection error: " + error.message;
+        console.error("Fetch error:", error);
+
+        if (selectedGame === gameAtRequest) {
+
+            setText(
+                "message",
+                "Connection error: " + error.message
+            );
         }
 
-        updateEngineStatus();
-
     } finally {
+
         fetching = false;
     }
 }
 
-// ==========================================
-// PATTERN ANALYSIS
-// ==========================================
+// ============================================
+// GET GAME RESULTS
+// ============================================
 
-function analysePatterns(filtered) {
-    if (!filtered.length) {
-        return {
-            streakType: "N/A",
-            streakLength: 0,
-            alternations: 0
-        };
+function getGameResults(game) {
+
+    return results
+        .filter(item => item.game === game)
+        .sort((a, b) =>
+            comparePeriods(a.period, b.period)
+        );
+}
+
+// ============================================
+// STATISTICAL ANALYSIS
+// ============================================
+
+function analyseResults(filtered) {
+
+    const total = filtered.length;
+
+    if (total === 0) {
+        return null;
     }
 
-    const ordered = filtered.slice().sort(
-        (a, b) => comparePeriods(a.period, b.period)
-    );
+    const big = filtered.filter(
+        r => getBigSmall(r.number) === "BIG"
+    ).length;
 
-    const latestType =
-        getBigSmall(ordered[ordered.length - 1].number);
+    const small = total - big;
 
-    let streakLength = 0;
+    const green = filtered.filter(
+        r => getColour(r.number).includes("GREEN")
+    ).length;
 
-    for (let i = ordered.length - 1; i >= 0; i--) {
-        if (getBigSmall(ordered[i].number) === latestType) {
-            streakLength++;
-        } else {
-            break;
-        }
-    }
+    const red = filtered.filter(
+        r => getColour(r.number).includes("RED")
+    ).length;
 
-    const recent = ordered.slice(-100);
+    const violet = filtered.filter(
+        r => getColour(r.number).includes("VIOLET")
+    ).length;
 
-    let alternations = 0;
+    const frequency = {};
 
-    for (let i = 1; i < recent.length; i++) {
-        if (
-            getBigSmall(recent[i].number) !==
-            getBigSmall(recent[i - 1].number)
-        ) {
-            alternations++;
-        }
+    for (let i = 0; i <= 9; i++) {
+        frequency[i] = filtered.filter(
+            r => Number(r.number) === i
+        ).length;
     }
 
     return {
-        streakType: latestType,
-        streakLength,
-        alternations
+        total,
+        big,
+        small,
+        green,
+        red,
+        violet,
+        frequency,
+        bigPercent: (big / total * 100).toFixed(1),
+        smallPercent: (small / total * 100).toFixed(1)
     };
 }
 
-// ==========================================
-// WEIGHTED TREND ENGINE
-// ==========================================
+// ============================================
+// WEIGHTED TREND ANALYSIS
+// ============================================
 
 function analyseWeightedTrend(filtered) {
+
+    if (filtered.length < 10) {
+        return {
+            prediction: "INSUFFICIENT DATA",
+            trendStrength: "0.0",
+            bigPercent: "0.0",
+            smallPercent: "0.0"
+        };
+    }
+
     const windows = [
         { size: 10, weight: 0.40 },
         { size: 30, weight: 0.30 },
@@ -357,9 +387,8 @@ function analyseWeightedTrend(filtered) {
     let smallScore = 0;
     let totalWeight = 0;
 
-    const breakdown = {};
-
     windows.forEach(window => {
+
         if (filtered.length < window.size) return;
 
         const sample = filtered.slice(-window.size);
@@ -370,51 +399,303 @@ function analyseWeightedTrend(filtered) {
 
         const small = sample.length - big;
 
-        const bigRate = big / sample.length;
-        const smallRate = small / sample.length;
+        bigScore +=
+            (big / sample.length) * window.weight;
 
-        bigScore += bigRate * window.weight;
-        smallScore += smallRate * window.weight;
+        smallScore +=
+            (small / sample.length) * window.weight;
 
         totalWeight += window.weight;
-
-        breakdown[window.size] = {
-            big,
-            small,
-            total: sample.length,
-            bigPercent: (bigRate * 100).toFixed(1),
-            smallPercent: (smallRate * 100).toFixed(1)
-        };
     });
-
-    if (!totalWeight) return null;
 
     bigScore /= totalWeight;
     smallScore /= totalWeight;
 
-    const trendStrength =
+    const strength =
         Math.max(bigScore, smallScore) * 100;
 
     let prediction = "NO CLEAR SIGNAL";
 
-    if (trendStrength >= 55) {
+    if (strength >= 55) {
         prediction =
             bigScore > smallScore ? "BIG" : "SMALL";
     }
 
     return {
         prediction,
-        trendStrength: trendStrength.toFixed(1),
+        trendStrength: strength.toFixed(1),
         bigPercent: (bigScore * 100).toFixed(1),
-        smallPercent: (smallScore * 100).toFixed(1),
-        breakdown
+        smallPercent: (smallScore * 100).toFixed(1)
     };
 }
 
-// ==========================================
-// PREDICTION ENGINE
-// ==========================================
+// ============================================
+// GENERATE STATISTICAL PREDICTION
+// ============================================
 
 function generatePrediction() {
-    const filtered = results
-        .filter
+
+    if (!selectedGame) return;
+
+    const filtered = getGameResults(selectedGame);
+
+    if (filtered.length < 10) return;
+
+    const latest = filtered[filtered.length - 1];
+
+    const next = nextPeriod(latest.period);
+
+    if (!next) return;
+
+    const analysis = analyseWeightedTrend(filtered);
+
+    const existing = predictions.find(p =>
+        p.game === selectedGame &&
+        String(p.period) === next
+    );
+
+    if (existing) return;
+
+    predictions.push({
+
+        game: selectedGame,
+
+        period: next,
+
+        prediction: analysis.prediction,
+
+        trendStrength: analysis.trendStrength,
+
+        actual: "",
+
+        status: "PENDING",
+
+        createdAt: new Date().toISOString()
+    });
+
+    savePredictions();
+}
+
+// ============================================
+// VERIFY PREDICTIONS
+// ============================================
+
+function verifyPredictions() {
+
+    let changed = false;
+
+    predictions.forEach(prediction => {
+
+        if (
+            prediction.game !== selectedGame ||
+            prediction.status !== "PENDING"
+        ) {
+            return;
+        }
+
+        const actualResult = results.find(r =>
+            r.game === prediction.game &&
+            String(r.period) === String(prediction.period)
+        );
+
+        if (!actualResult) return;
+
+        const actual = getBigSmall(actualResult.number);
+
+        prediction.actual = actual;
+
+        if (
+            prediction.prediction === "BIG" ||
+            prediction.prediction === "SMALL"
+        ) {
+
+            prediction.status =
+                prediction.prediction === actual
+                    ? "WIN"
+                    : "LOSS";
+
+        } else {
+
+            prediction.status = "NO SIGNAL";
+        }
+
+        changed = true;
+    });
+
+    if (changed) {
+        savePredictions();
+    }
+}
+
+// ============================================
+// UPDATE DASHBOARD
+// ============================================
+
+function updateDashboard() {
+
+    if (!selectedGame) return;
+
+    const filtered = getGameResults(selectedGame);
+
+    const analysis = analyseResults(filtered);
+
+    if (!analysis) {
+
+        setText("total", "0");
+        setText("big", "0");
+        setText("small", "0");
+        setText("green", "0");
+        setText("red", "0");
+        setText("violet", "0");
+
+        setText("bigPercent", "0%");
+        setText("smallPercent", "0%");
+
+        setText("frequency", "Waiting for results...");
+        setText("history", "Waiting for results...");
+
+        return;
+    }
+
+    setText("total", analysis.total);
+    setText("big", analysis.big);
+    setText("small", analysis.small);
+
+    setText("green", analysis.green);
+    setText("red", analysis.red);
+    setText("violet", analysis.violet);
+
+    setText("bigPercent", analysis.bigPercent + "%");
+    setText("smallPercent", analysis.smallPercent + "%");
+
+    // Number frequency
+
+    const frequencyHTML = Object.keys(
+        analysis.frequency
+    ).map(number => {
+
+        return `
+            <p>
+                Number ${number}:
+                ${analysis.frequency[number]}
+            </p>
+        `;
+
+    }).join("");
+
+    const frequencyElement = getElement("frequency");
+
+    if (frequencyElement) {
+        frequencyElement.innerHTML = frequencyHTML;
+    }
+
+    // Recent results
+
+    const recent = filtered.slice(-15).reverse();
+
+    const historyHTML = recent.map(item => {
+
+        return `
+            <p>
+                Period: ${escapeHTML(item.period)}
+                | Number: ${item.number}
+                | ${escapeHTML(getBigSmall(item.number))}
+                | ${escapeHTML(item.colour)}
+            </p>
+        `;
+
+    }).join("");
+
+    const historyElement = getElement("history");
+
+    if (historyElement) {
+        historyElement.innerHTML =
+            historyHTML || "No history available";
+    }
+
+    // Statistical signal
+
+    const trend = analyseWeightedTrend(filtered);
+
+    const latestPrediction = predictions
+        .filter(p => p.game === selectedGame)
+        .slice(-1)[0];
+
+    if (latestPrediction) {
+
+        setText(
+            "game",
+            "Wingo " + selectedGame +
+            " | Next period: " + latestPrediction.period +
+            " | Signal: " + latestPrediction.prediction +
+            " | Trend: " + latestPrediction.trendStrength + "%"
+        );
+    }
+}
+
+// ============================================
+// PREDICTION HISTORY TABLE
+// ============================================
+
+function renderPredictionHistory() {
+
+    const table = getElement("predictionHistory");
+
+    if (!table || !selectedGame) return;
+
+    const filtered = predictions
+        .filter(p => p.game === selectedGame)
+        .sort((a, b) =>
+            comparePeriods(b.period, a.period)
+        )
+        .slice(0, 50);
+
+    if (!filtered.length) {
+
+        table.innerHTML = `
+            <tr>
+                <td colspan="4">Waiting for predictions...</td>
+            </tr>
+        `;
+
+        return;
+    }
+
+    table.innerHTML = filtered.map(item => {
+
+        return `
+            <tr>
+                <td>${escapeHTML(item.period)}</td>
+
+                <td>${escapeHTML(item.prediction)}</td>
+
+                <td>${escapeHTML(item.actual || "-")}</td>
+
+                <td>${escapeHTML(item.status)}</td>
+            </tr>
+        `;
+
+    }).join("");
+}
+
+// ============================================
+// AUTOMATIC REFRESH
+// ============================================
+
+setInterval(() => {
+
+    if (selectedGame) {
+        fetchWingoResults();
+    }
+
+}, 10000);
+
+// ============================================
+// STARTUP
+// ============================================
+
+updateDashboard();
+
+renderPredictionHistory();
+
+console.log("ULTRA AI PRO loaded successfully");
