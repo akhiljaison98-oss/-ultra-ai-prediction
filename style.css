@@ -2,122 +2,153 @@
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-}
+    }
 
 body {
-    background: #080d18;
-    color: white;
-    font-family: Arial, sans-serif;
-    padding: 20px;
+background: #080d18;
+color: white;
+font-family: Arial, sans-serif;
+padding: 20px;
 }
 
 header {
-    text-align: center;
-    padding: 30px 10px;
+text-align: center;
+padding: 30px 10px;
 }
 
 header h1 {
-    color: #00e5ff;
-    font-size: 32px;
-    letter-spacing: 3px;
+color: #00e5ff;
+font-size: 32px;
+letter-spacing: 3px;
 }
 
 header p {
-    color: #8995a8;
-    font-size: 11px;
-    margin-top: 8px;
+color: #8995a8;
+font-size: 11px;
+margin-top: 8px;
 }
 
 main {
-    max-width: 650px;
-    margin: auto;
+max-width: 650px;
+margin: auto;
 }
 
 .card {
-    background: #111b2c;
-    border: 1px solid #23344d;
-    border-radius: 15px;
-    padding: 22px;
-    margin-bottom: 20px;
+background: #111b2c;
+border: 1px solid #23344d;
+border-radius: 15px;
+padding: 22px;
+margin-bottom: 20px;
 }
 
 .card h2 {
-    color: #00e5ff;
-    font-size: 17px;
-    margin-bottom: 15px;
+color: #00e5ff;
+font-size: 17px;
+margin-bottom: 15px;
 }
 
 .card p {
-    color: #bdc8d8;
-    margin-bottom: 12px;
+color: #bdc8d8;
+margin-bottom: 12px;
 }
 
 .status {
-    color: #00ff9d;
-    margin-top: 20px;
-    font-weight: bold;
+color: #00ff9d;
+margin-top: 20px;
+font-weight: bold;
 }
 
 button {
-    background: #00bcd4;
-    color: #07111c;
-    border: none;
-    padding: 13px;
-    border-radius: 8px;
-    margin: 5px;
-    font-weight: bold;
-    cursor: pointer;
+background: #00bcd4;
+color: #07111c;
+border: none;
+padding: 13px;
+border-radius: 8px;
+margin: 5px;
+font-weight: bold;
+cursor: pointer;
 }
 
-button:hover {
-    background: #00e5ff;
-}
 /* ULTRA AI ADVANCED COMPONENTS */
 
 input {
-    width: 100%;
-    padding: 15px;
-    margin: 15px 0;
-    border-radius: 8px;
-    border: 1px solid #00bcd4;
-    background: #080d18;
-    color: white;
-    font-size: 16px;
+width: 100%;
+padding: 15px;
+margin: 15px 0;
+border-radius: 8px;
+border: 1px solid #00bcd4;
+background: #080d18;
+color: white;
+font-size: 16px;
 }
 
 button {
-    margin: 8px 3px;
-    padding: 15px 18px;
+margin: 8px 3px;
+padding: 15px 18px;
 }
 
 .result-number {
-    display: inline-block;
-    background: #00bcd4;
-    color: #080d18;
-    padding: 12px 17px;
-    margin: 5px;
-    border-radius: 8px;
-    font-weight: bold;
-    font-size: 18px;
+display: inline-block;
+background: #00bcd4;
+color: #080d18;
+padding: 12px 17px;
+margin: 5px;
+border-radius: 8px;
+font-weight: bold;
+font-size: 18px;
 }
 
 .card h3 {
-    color: #00e5ff;
-    margin: 20px 0 12px;
+color: #00e5ff;
+margin: 20px 0 12px;
 }
 
 #frequency p {
-    padding: 10px;
-    margin: 5px 0;
-    background: #19263a;
-    border-radius: 6px;
+padding: 10px;
+margin: 5px 0;
+background: #19263a;
+border-radius: 6px;
 }
 
 #history {
-    margin-top: 15px;
-    line-height: 2.5;
+margin-top: 15px;
+line-height: 2.5;
 }
 
 button:active {
-    transform: scale(0.96);
+transform: scale(0.96);
+}
+
+/* PREDICTION HISTORY SCROLL */
+
+.table-container {
+max-height: 350px;
+overflow-y: auto;
+overflow-x: auto;
+border-radius: 10px;
+}
+
+.table-container table {
+width: 100%;
+min-width: 450px;
+border-collapse: collapse;
+}
+
+.table-container th,
+.table-container td {
+padding: 12px 8px;
+text-align: center;
+white-space: nowrap;
+border-bottom: 1px solid #23344d;
+}
+
+.table-container thead th {
+position: sticky;
+top: 0;
+background: #111b2c;
+z-index: 2;
+}
+
+.table-container tbody tr:hover {
+background: #19263a;
 }
